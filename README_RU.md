@@ -8,7 +8,7 @@
 
 [English](README.md) · **Русский**
 
-Вход через Яндекс ID для Kotlin Multiplatform. Один suspend-вызов, одинаково на Android и на iOS:
+Вход через Яндекс ID для Kotlin Multiplatform. Один suspend-вызов на Android и iOS:
 
 ```kotlin
 when (val outcome = yandexAuthClient.signIn()) {
@@ -18,105 +18,63 @@ when (val outcome = yandexAuthClient.signIn()) {
 }
 ```
 
-Ни `Activity`, ни `UIViewController`, ни типов SDK Яндекса выше границы.
+Две части, потому что iOS-SDK Яндекса написан на чистом Swift и Kotlin/Native его не видит:
 
-## Почему библиотека состоит из двух частей
+| Часть | Откуда |
+|---|---|
+| `tech.chatan:yandex-auth-kmp` | Maven Central. Kotlin-API + Android. |
+| `YandexAuthBridge` | SwiftPM, этот репозиторий. iOS. |
 
-| Часть | Откуда берётся | Что это |
-|---|---|---|
-| `tech.chatan:yandex-auth-kmp` | Maven Central | Kotlin-API и реализация под Android |
-| `YandexAuthBridge` | Swift Package, этот же репозиторий | Реализация под iOS поверх `YandexLoginSDK` |
-
-iOS-SDK Яндекса написан на чистом Swift и не имеет Objective-C заголовков, поэтому Kotlin/Native не
-может обратиться к нему вообще. iOS-половину обязан реализовать Swift. Ваше приложение соединяет две
-части небольшим адаптером, и этот адаптер — единственный код, который вы пишете сами. Он в шаге 4.
-
-Требования: Android 24+, iOS 14+, Kotlin 2.4.
+Соединяются одним адаптером, который пишете вы (шаг 4, 20 строк). Требования: Android 24+, iOS 14+,
+Kotlin 2.4.
 
 ---
 
-## Шаг 1. Получить client id у Яндекса
+## 1. Client ID
 
-Зайдите на [oauth.yandex.ru/client/new](https://oauth.yandex.ru/client/new) и создайте приложение.
-Одно приложение обслуживает обе платформы, заводить два не нужно.
+Создайте приложение на [oauth.yandex.ru/client/new](https://oauth.yandex.ru/client/new). Одно
+приложение покрывает обе платформы.
 
-**Платформа.** Отметьте `Android-приложение`, `iOS-приложение` или обе.
+| Поле | Что вписать |
+|---|---|
+| Платформа | `Android-приложение`, `iOS-приложение` или обе |
+| Package name для Android | ваш `applicationId` |
+| SHA256-фингерпринты | `./gradlew signingReport`. Добавьте debug **и** release; при Play App Signing — отпечаток из Play Console |
+| AppId для iOS | `TEAMPREFIX.com.example.app` |
+| Redirect URI | `yx<client-id>://auth/finish` |
+| Доступ к данным | что нужно бэкенду (обычно почта и имя) |
 
-**Для Android** заполните:
+Client ID — публичный идентификатор, не секрет. В мобильном OAuth нет client secret, оба SDK
+используют PKCE. Коммитьте спокойно.
 
-- `Package name для Android` — ваш `applicationId`, ровно как в `build.gradle.kts`.
-- `SHA256-фингерпринты` — отпечаток сертификата, которым вы подписываете приложение. Получить так:
+## 2. Подключение
 
-  ```bash
-  ./gradlew signingReport
-  ```
-
-  Добавьте все сертификаты, которыми реально пользуетесь. Debug и release подписываются разными
-  ключами, а значит и отпечатки у них разные. Если включена подпись через Play App Signing, нужен тот
-  отпечаток, который показывает Play Console, а не ваш upload-ключ.
-
-**Для iOS** заполните:
-
-- `AppId для iOS` — префикс команды и bundle id, например `A1B2C3D4E5.com.example.app`.
-
-**Redirect URI.** SDK возвращает токен через `yx<client-id>://auth/finish`. Впишите это, подставив
-выданный вам id.
-
-**Доступ к данным.** Отметьте права, которые нужны вашему бэкенду. Для входа это обычно почта и имя
-пользователя.
-
-На выходе получите **Client ID** — 32 символа в шестнадцатеричном виде. Это **не секрет**: мобильный
-OAuth-поток не содержит client secret, оба SDK используют PKCE. Коммитить его можно спокойно.
-
----
-
-## Шаг 2. Подключить зависимости
-
-### Kotlin, в вашем shared-модуле
+**Gradle**, в shared-модуле:
 
 ```kotlin
-// shared/build.gradle.kts
 kotlin {
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
         target.binaries.framework {
             baseName = "Shared"
-            // Обязательно. Swift реализует `YandexAuthHandler`, значит тип должен попасть в Shared.h,
-            // а туда его кладёт только `export`.
-            export("tech.chatan:yandex-auth-kmp:0.1.0")
+            export("tech.chatan:yandex-auth-kmp:0.1.0")   // ← обязательно
         }
     }
-
     sourceSets {
         commonMain.dependencies {
-            // `api`, а не `implementation`: `export` выше требует именно её.
-            api("tech.chatan:yandex-auth-kmp:0.1.0")
+            api("tech.chatan:yandex-auth-kmp:0.1.0")      // ← `api`, потому что этого требует `export`
         }
     }
 }
 ```
 
-Забудете `export` — типы не дойдут до `Shared.h`, Swift их не увидит, и адаптер из шага 4 не
-скомпилируется.
+> **Зачем `export`.** Swift реализует `YandexAuthHandler`, значит тип обязан попасть в `Shared.h`.
+> Кладёт его туда только `export`. Без него шаг 4 не скомпилируется.
 
-### Swift, в вашем iOS-приложении
+**SwiftPM**, в Xcode: *File → Add Package Dependencies* →
+`https://github.com/sub4ikgg/yandex-auth-kmp` → добавьте `YandexAuthBridge` к таргету приложения.
+`YandexLoginSDK` подтянется сам.
 
-В Xcode: **File → Add Package Dependencies**, вставьте
-
-```
-https://github.com/sub4ikgg/yandex-auth-kmp
-```
-
-Выберите `Up to Next Major Version` от `0.1.0` и добавьте библиотеку `YandexAuthBridge` к таргету
-приложения. `YandexLoginSDK` она подтянет сама, отдельно подключать его не надо.
-
----
-
-## Шаг 3. Настроить Android
-
-### Плейсхолдеры манифеста
-
-AuthSDK Яндекса читает client id из манифеста, а не из кода. В своём манифесте он объявляет
-`<meta-data>` и intent-фильтр, который ловит OAuth-редирект, и оставляет вам два плейсхолдера:
+## 3. Android
 
 ```kotlin
 // app/build.gradle.kts
@@ -128,19 +86,18 @@ android {
 }
 ```
 
-Пропустите это — и слияние манифестов упадёт сразу.
+> **Зачем.** AAR Яндекса объявляет свой `<meta-data>` и intent-фильтр редиректа через эти два
+> плейсхолдера. Без них слияние манифестов падает.
 
-Те же два значения нужны **каждому library-модулю**, который тоже видит AAR Яндекса. Если модуль на
-KMP-плагине `androidLibrary`, свойства `manifestPlaceholders` у него нет, и путь один — через
-variant API:
+Те же два значения нужны **каждому library-модулю**, который видит AAR. У KMP-плагина
+`androidLibrary` свойства `manifestPlaceholders` нет, поэтому:
 
 ```kotlin
 androidComponents {
     onVariants { variant ->
         variant.manifestPlaceholders.put("YANDEX_CLIENT_ID", "ваш-client-id")
         variant.manifestPlaceholders.put("YANDEX_OAUTH_HOST", "oauth.yandex.ru")
-        // Host-тесты собирают свой манифест и это не наследуют.
-        variant.hostTests.forEach { (_, hostTest) ->
+        variant.hostTests.forEach { (_, hostTest) ->            // host-тесты собирают свой манифест
             hostTest.manifestPlaceholders.put("YANDEX_CLIENT_ID", "ваш-client-id")
             hostTest.manifestPlaceholders.put("YANDEX_OAUTH_HOST", "oauth.yandex.ru")
         }
@@ -148,47 +105,39 @@ androidComponents {
 }
 ```
 
-### Две точки жизненного цикла
+Дальше два вызова в жизненном цикле:
 
 ```kotlin
 class App : Application() {
     override fun onCreate() {
         super.onCreate()
-        AndroidYandexAuth.init(this)
+        AndroidYandexAuth.init(this)                  // один раз на процесс
     }
 }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        // После super.onCreate, чтобы реестр результатов успел восстановиться.
-        // До onStart, потому что там регистрация activity result уже бросает исключение.
+        super.onCreate(savedInstanceState)            // ← после super, до onStart
         AndroidYandexAuth.registerLauncher(this)
     }
 }
 ```
 
-`init` создаёт handler один раз на весь процесс. `registerLauncher` привязывает свежий launcher к
-каждой Activity и отпускает его при destroy. Handler живёт дольше Activity намеренно — см. шаг 5.
+> **Зачем такой порядок.** После `super.onCreate` реестр результатов уже восстановлен. В `onStart`
+> регистрация activity result бросает исключение.
 
----
+## 4. iOS
 
-## Шаг 4. Настроить iOS
-
-### Info.plist
+**Info.plist:**
 
 ```xml
 <key>CFBundleURLTypes</key>
 <array>
     <dict>
-        <key>CFBundleTypeRole</key>
-        <string>Editor</string>
-        <key>CFBundleURLName</key>
-        <string>YandexLoginSDK</string>
+        <key>CFBundleTypeRole</key><string>Editor</string>
+        <key>CFBundleURLName</key><string>YandexLoginSDK</string>
         <key>CFBundleURLSchemes</key>
-        <array>
-            <string>yx&lt;ваш-client-id&gt;</string>
-        </array>
+        <array><string>yx&lt;ваш-client-id&gt;</string></array>
     </dict>
 </array>
 <key>LSApplicationQueriesSchemes</key>
@@ -198,16 +147,11 @@ class MainActivity : ComponentActivity() {
 </array>
 ```
 
-URL-схема — это буквально `yx`, слитно с вашим client id, без разделителя. По ней OAuth-редирект
-находит дорогу обратно в приложение. Запрашиваемые схемы нужны, чтобы SDK заметил установленное
-приложение Яндекса и передал вход ему.
+> **Зачем.** Схема — это `yx` + client id слитно, без разделителя: по ней редирект возвращается в
+> приложение. Запрашиваемые схемы нужны, чтобы SDK заметил установленное приложение Яндекса. И то и
+> другое проверяется на старте, так что опечатка вылезет сразу при запуске.
 
-И то и другое проверяется при старте SDK, так что ошибка здесь всплывёт на запуске, а не потом в виде
-кнопки, которая ничего не делает.
-
-### Адаптер
-
-Это единственный файл, который библиотека не может написать за вас: ему нужен `import` вашего
+**Адаптер.** Единственный файл, который библиотека не может привезти сама: ему нужен `import` вашего
 umbrella-фреймворка, а его имя знаете только вы.
 
 ```swift
@@ -233,14 +177,13 @@ final class YandexAuthAdapter: YandexAuthHandler {
 }
 ```
 
-### Включить всё это на старте
+**Включить на старте:**
 
 ```swift
 @main
 struct MyApp: App {
 
     init() {
-        // До первого view, чтобы никто не успел попросить токен слишком рано.
         if YandexAuthBridge.shared.install(clientID: "ваш-client-id") {
             IosYandexAuth.shared.bridge = YandexAuthAdapter()
         }
@@ -249,8 +192,6 @@ struct MyApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                // Редирект приходит либо своей схемой, либо universal link, если вход обработало
-                // приложение Яндекса. Подключите оба.
                 .onOpenURL { YandexAuthBridge.shared.handle(url: $0) }
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) {
                     YandexAuthBridge.shared.handle(userActivity: $0)
@@ -260,35 +201,27 @@ struct MyApp: App {
 }
 ```
 
-`install` возвращает `false`, если client id битый или `Info.plist` собран неправильно. Он не бросает
-исключение и не падает: плохой plist не должен ронять приложение на запуске. Ставьте адаптер только
-когда вернулось `true` — тогда нажатие на кнопку Яндекса вернёт обычную ошибку вместо зависания.
+> **Зачем `if`.** При битом client id или plist `install` возвращает `false`, а не бросает исключение.
+> Сломанная конфигурация станет `Failed` на экране входа, а не падением на запуске.
+>
+> **Зачем оба обработчика URL.** Редирект приходит либо своей схемой, либо universal link — если вход
+> обработало приложение Яндекса.
 
----
-
-## Шаг 5. Пользоваться
-
-Соберите клиент один раз, на уровне процесса, и читайте handler поздно:
+## 5. Использование
 
 ```kotlin
-object AppGraph {
-    val yandexAuthClient: YandexAuthClient by lazy {
-        YandexAuthClient.factory(provideYandexAuthHandler())
-    }
+val yandexAuthClient: YandexAuthClient by lazy {
+    YandexAuthClient.factory(provideYandexAuthHandler())
 }
 ```
 
-Поздно — и это важно. Retained-состояние (`ViewModel` или что угодно другое, что переживает
-пересоздание Activity) живёт дольше, чем Activity, которая его создала. Handler, переданный
-аргументом конструктора, после первого же пересоздания будет указывать на старую Activity, и кнопка
-Яндекса тихо перестанет работать. Чтение через `provideYandexAuthHandler()` в момент вызова делает
-это невозможным.
-
-Дальше — где угодно:
+> **Почему `lazy`, а не аргумент конструктора.** Retained-состояние (`ViewModel` и всё, что переживает
+> пересоздание Activity) живёт дольше создавшей его Activity. Переданный аргументом handler после
+> первого пересоздания будет указывать на мёртвую Activity, и кнопка тихо перестанет работать.
 
 ```kotlin
 scope.launch {
-    when (val outcome = AppGraph.yandexAuthClient.signIn()) {
+    when (val outcome = yandexAuthClient.signIn()) {
         is YandexAuthOutcome.Token -> authRepository.signInWithYandex(outcome.value)
         YandexAuthOutcome.Cancelled -> Unit
         is YandexAuthOutcome.Failed -> showError()
@@ -296,23 +229,16 @@ scope.launch {
 }
 ```
 
-`signIn()` всегда возвращается, ровно один раз. Исключений не бросает.
+`signIn()` всегда возвращается, ровно один раз, и не бросает исключений.
 
-## Что означают исходы
+| Исход | Что значит |
+|---|---|
+| `Token` | OAuth-токен. Отправьте на бэкенд; библиотека ничего не хранит. |
+| `Cancelled` | Пользователь передумал. Экран возвращается в покой. На iOS сюда же попадают несколько сбоев SDK, которые он не даёт отличить от отмены. |
+| `Failed` | Сломался SDK. `reason` — для лога, не для пользователя. |
 
-`Token` несёт OAuth-токен. Отправьте его на свой бэкенд. Библиотека ничего не хранит.
-
-`Cancelled` значит, что пользователь передумал. Это нормальный ответ, а не ошибка, и экран должен
-просто вернуться в покой. На iOS сюда же попадают несколько сбоев SDK, которые SDK не даёт отличить
-от отмены, так что редкий сетевой сбой внутри приложения тоже прочтётся как отмена. Это осознанный
-размен: показать ошибку тому, кто нажал «Отмена», хуже, чем промолчать про сбой, который он всё равно
-может повторить.
-
-`Failed` значит, что сломался сам SDK. Причина — для вашего лога, не для пользователя.
-
-`signOut()` стирает вход, который SDK закешировал. На iOS вызывать обязательно, иначе следующий
-`signIn()` молча переиспользует сохранённый аккаунт и вернёт пользователя туда, откуда он только что
-вышел. На Android не делает ничего: Android-SDK между входами ничего не хранит.
+`signOut()` стирает закешированный вход. **На iOS вызывать обязательно**, иначе следующий `signIn()`
+молча переиспользует сохранённый аккаунт. На Android не делает ничего (SDK там ничего не кеширует).
 
 ## Лицензия
 

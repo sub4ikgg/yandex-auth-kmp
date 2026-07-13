@@ -1,0 +1,24 @@
+[versions]
+agp = "9.0.1"
+android-compileSdk = "36"
+android-minSdk = "24"
+androidx-activity = "1.13.0"
+coroutines = "1.10.2"
+kotlin = "2.4.0"
+mavenPublish = "0.37.0"
+yandexAuthSdk = "3.2.1"
+
+[libraries]
+kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
+# The Yandex SDK hands its result back through an ActivityResultContract, so the module that drives it
+# needs the Activity Result APIs on its own compile classpath — not just transitively through the AAR.
+androidx-activity-ktx = { module = "androidx.activity:activity-ktx", version.ref = "androidx-activity" }
+yandex-authsdk = { module = "com.yandex.android:authsdk", version.ref = "yandexAuthSdk" }
+
+[plugins]
+androidMultiplatformLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+mavenPublish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }

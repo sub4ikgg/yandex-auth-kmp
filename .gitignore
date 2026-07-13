@@ -1,0 +1,14 @@
+.gradle/
+build/
+local.properties
+.kotlin/
+
+.idea/
+*.iml
+
+.DS_Store
+
+# SwiftPM
+.build/
+.swiftpm/
+Package.resolved

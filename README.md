@@ -29,7 +29,10 @@ You write one adapter to join them (step 4, 20 lines). Requirements: Android 24+
 
 ---
 
-## 1. Client ID
+## Step 1 · Register the app with Yandex and get a Client ID
+
+Nothing to code yet. You are telling Yandex which app is allowed to ask for tokens, and getting back
+the id that identifies it.
 
 Create an app at [oauth.yandex.ru/client/new](https://oauth.yandex.ru/client/new). One app covers both
 platforms.
@@ -46,7 +49,10 @@ platforms.
 The Client ID is public, not a secret. Mobile OAuth ships no client secret; both SDKs use PKCE.
 Commit it.
 
-## 2. Install
+## Step 2 · Add both halves as dependencies
+
+The Kotlin half comes from Maven Central, the iOS half from SwiftPM. Two package managers, one
+library, because Yandex splits it for us.
 
 **Gradle**, in your shared module:
 
@@ -73,7 +79,10 @@ kotlin {
 `https://github.com/sub4ikgg/yandex-auth-kmp` → add `YandexAuthBridge` to your app target. It pulls in
 `YandexLoginSDK` itself.
 
-## 3. Android
+## Step 3 · Wire up Android: manifest placeholders, then two lifecycle calls
+
+The Yandex SDK reads its client id from the manifest, not from code, so first you fill in what it left
+blank. Then you hand it a process-scoped handler and a per-Activity launcher.
 
 ```kotlin
 // app/build.gradle.kts
@@ -125,7 +134,10 @@ class MainActivity : ComponentActivity() {
 > **Why that order.** After `super.onCreate`, the activity result registry has restored itself. In
 > `onStart`, registering an activity result throws.
 
-## 4. iOS
+## Step 4 · Wire up iOS: Info.plist, the adapter, and installing it at launch
+
+Here you write the one file this library cannot ship for you. It teaches the Swift package how to
+answer the Kotlin side, and installs itself before anything can ask for a token.
 
 **Info.plist:**
 
@@ -206,7 +218,10 @@ struct MyApp: App {
 > **Why both URL handlers.** The redirect comes back as a custom scheme, or as a universal link when
 > the Yandex app handled the sign-in.
 
-## 5. Use
+## Step 5 · Call it from common code
+
+Everything above was platform plumbing. From here on the two platforms look identical: build the
+client once, then call one suspend function.
 
 ```kotlin
 val yandexAuthClient: YandexAuthClient by lazy {

@@ -48,7 +48,19 @@ Kotlin 2.4.
 
 Kotlin-половина из Maven Central, iOS-половина из SwiftPM.
 
-**Gradle**, в shared-модуле:
+**Gradle.** Убедитесь, что репозиторий подключён:
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()   // ← артефакт лежит здесь
+    }
+}
+```
+
+Дальше, в shared-модуле:
 
 ```kotlin
 kotlin {

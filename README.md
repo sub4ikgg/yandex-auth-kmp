@@ -47,7 +47,19 @@ platforms.
 
 Kotlin half from Maven Central, iOS half from SwiftPM.
 
-**Gradle**, in your shared module:
+**Gradle.** Make sure the repository is there:
+
+```kotlin
+// settings.gradle.kts
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()   // ← the artifact lives here
+    }
+}
+```
+
+Then, in your shared module:
 
 ```kotlin
 kotlin {

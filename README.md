@@ -66,7 +66,7 @@ kotlin {
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
         target.binaries.framework {
             baseName = "Shared"
-            export("tech.chatan:yandex-auth-kmp:0.1.0")   // ← not optional
+            export("tech.chatan:yandex-auth-kmp:0.1.0")   // ← puts YandexAuthHandler in Shared.h; step 4 needs it
         }
     }
     sourceSets {
@@ -76,9 +76,6 @@ kotlin {
     }
 }
 ```
-
-> **Why `export`.** Swift implements `YandexAuthHandler`, so the type has to appear in `Shared.h`.
-> Only `export` puts it there. Skip it and step 4 will not compile.
 
 **SwiftPM**, in Xcode: *File → Add Package Dependencies* →
 `https://github.com/sub4ikgg/yandex-auth-kmp` → add `YandexAuthBridge` to your app target. It pulls in
@@ -96,8 +93,8 @@ android {
 }
 ```
 
-> **Why.** The Yandex AAR declares its `<meta-data>` and redirect intent-filter with these two
-> placeholders. Miss them and the manifest merge fails.
+> The Yandex AAR declares its `<meta-data>` and redirect intent-filter with these two placeholders.
+> Miss them and the manifest merge fails.
 
 Every **library** module that also sees the AAR needs the same two. On the KMP `androidLibrary`
 plugin there is no `manifestPlaceholders` property, so:
@@ -127,14 +124,11 @@ class App : Application() {
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)            // ← after super, before onStart
-        AndroidYandexAuth.registerLauncher(this)
+        super.onCreate(savedInstanceState)            // ← the result registry is restored here
+        AndroidYandexAuth.registerLauncher(this)      // ← in onStart this would throw
     }
 }
 ```
-
-> **Why that order.** After `super.onCreate`, the activity result registry has restored itself. In
-> `onStart`, registering an activity result throws.
 
 ## Step 4 · Wire up iOS: Info.plist, the adapter, and installing it at launch
 
@@ -157,9 +151,9 @@ class MainActivity : ComponentActivity() {
 </array>
 ```
 
-> **Why.** The scheme is `yx` + client id, no separator: it is how the redirect gets back into your
-> app. The queried schemes let the SDK spot an installed Yandex app. Both are checked at startup, so
-> a typo fails loudly at launch.
+> The scheme is `yx` + client id, no separator — it is how the redirect gets back into your app. The
+> queried schemes let the SDK spot an installed Yandex app. Both are checked at launch, so a typo
+> fails loudly there.
 
 **The adapter.** The one file this library cannot ship, because it has to `import` your umbrella
 framework and only you know its name:
@@ -194,6 +188,8 @@ final class YandexAuthAdapter: YandexAuthHandler {
 struct MyApp: App {
 
     init() {
+        // returns false on a bad client id or plist instead of throwing:
+        // a broken config is a `Failed` on the login screen, not a crash at launch
         if YandexAuthBridge.shared.install(clientID: "your-client-id") {
             IosYandexAuth.shared.bridge = YandexAuthAdapter()
         }
@@ -202,7 +198,9 @@ struct MyApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                // the redirect comes back either as a custom scheme...
                 .onOpenURL { YandexAuthBridge.shared.handle(url: $0) }
+                // ...or as a universal link, when the Yandex app handled the sign-in
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) {
                     YandexAuthBridge.shared.handle(userActivity: $0)
                 }
@@ -210,12 +208,6 @@ struct MyApp: App {
     }
 }
 ```
-
-> **Why the `if`.** `install` returns `false` on a bad client id or plist instead of throwing, so a
-> broken config is a `Failed` on the login screen, not a crash at launch.
->
-> **Why both URL handlers.** The redirect comes back as a custom scheme, or as a universal link when
-> the Yandex app handled the sign-in.
 
 ## Step 5 · Call it from common code
 
@@ -225,9 +217,9 @@ val yandexAuthClient: YandexAuthClient by lazy {
 }
 ```
 
-> **Why `lazy` and not a constructor argument.** Retained state (a `ViewModel`, anything surviving
-> Activity recreation) outlives the Activity that made it. A handler passed in would point at the dead
-> Activity after the first recreation, and the button would stop working with no error.
+> `lazy`, not a constructor argument: a `ViewModel` outlives the Activity that made it, so a handler
+> passed in would point at a dead Activity after the first recreation — and the button would stop
+> working with no error.
 
 ```kotlin
 scope.launch {

@@ -67,7 +67,7 @@ kotlin {
     listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
         target.binaries.framework {
             baseName = "Shared"
-            export("tech.chatan:yandex-auth-kmp:0.1.0")   // ← обязательно
+            export("tech.chatan:yandex-auth-kmp:0.1.0")   // ← кладёт YandexAuthHandler в Shared.h; без него не будет шага 4
         }
     }
     sourceSets {
@@ -77,9 +77,6 @@ kotlin {
     }
 }
 ```
-
-> **Зачем `export`.** Swift реализует `YandexAuthHandler`, значит тип обязан попасть в `Shared.h`.
-> Кладёт его туда только `export`. Без него шаг 4 не скомпилируется.
 
 **SwiftPM**, в Xcode: *File → Add Package Dependencies* →
 `https://github.com/sub4ikgg/yandex-auth-kmp` → добавьте `YandexAuthBridge` к таргету приложения.
@@ -97,8 +94,8 @@ android {
 }
 ```
 
-> **Зачем.** AAR Яндекса объявляет свой `<meta-data>` и intent-фильтр редиректа через эти два
-> плейсхолдера. Без них слияние манифестов падает.
+> AAR Яндекса объявляет свой `<meta-data>` и intent-фильтр редиректа через эти два плейсхолдера.
+> Без них слияние манифестов падает.
 
 Те же два значения нужны **каждому library-модулю**, который видит AAR. У KMP-плагина
 `androidLibrary` свойства `manifestPlaceholders` нет, поэтому:
@@ -128,14 +125,11 @@ class App : Application() {
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)            // ← после super, до onStart
-        AndroidYandexAuth.registerLauncher(this)
+        super.onCreate(savedInstanceState)            // ← здесь реестр результатов уже восстановлен
+        AndroidYandexAuth.registerLauncher(this)      // ← в onStart это бросит исключение
     }
 }
 ```
-
-> **Зачем такой порядок.** После `super.onCreate` реестр результатов уже восстановлен. В `onStart`
-> регистрация activity result бросает исключение.
 
 ## Шаг 4 · Настраиваем iOS: Info.plist, адаптер и установка на старте
 
@@ -158,9 +152,9 @@ class MainActivity : ComponentActivity() {
 </array>
 ```
 
-> **Зачем.** Схема — это `yx` + client id слитно, без разделителя: по ней редирект возвращается в
-> приложение. Запрашиваемые схемы нужны, чтобы SDK заметил установленное приложение Яндекса. И то и
-> другое проверяется на старте, так что опечатка вылезет сразу при запуске.
+> Схема — это `yx` + client id слитно, без разделителя: по ней редирект возвращается в приложение.
+> Запрашиваемые схемы нужны, чтобы SDK заметил установленное приложение Яндекса. И то и другое
+> проверяется на старте, так что опечатка вылезет сразу при запуске.
 
 **Адаптер.** Единственный файл, который библиотека не может привезти сама: ему нужен `import` вашего
 umbrella-фреймворка, а его имя знаете только вы.
@@ -195,6 +189,8 @@ final class YandexAuthAdapter: YandexAuthHandler {
 struct MyApp: App {
 
     init() {
+        // при битом client id или plist вернёт false, а не бросит исключение:
+        // сломанная конфигурация станет `Failed` на экране входа, а не падением на запуске
         if YandexAuthBridge.shared.install(clientID: "ваш-client-id") {
             IosYandexAuth.shared.bridge = YandexAuthAdapter()
         }
@@ -203,7 +199,9 @@ struct MyApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                // редирект приходит либо своей схемой...
                 .onOpenURL { YandexAuthBridge.shared.handle(url: $0) }
+                // ...либо universal link — если вход обработало приложение Яндекса
                 .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) {
                     YandexAuthBridge.shared.handle(userActivity: $0)
                 }
@@ -211,12 +209,6 @@ struct MyApp: App {
     }
 }
 ```
-
-> **Зачем `if`.** При битом client id или plist `install` возвращает `false`, а не бросает исключение.
-> Сломанная конфигурация станет `Failed` на экране входа, а не падением на запуске.
->
-> **Зачем оба обработчика URL.** Редирект приходит либо своей схемой, либо universal link — если вход
-> обработало приложение Яндекса.
 
 ## Шаг 5 · Вызываем из общего кода
 
@@ -226,9 +218,9 @@ val yandexAuthClient: YandexAuthClient by lazy {
 }
 ```
 
-> **Почему `lazy`, а не аргумент конструктора.** Retained-состояние (`ViewModel` и всё, что переживает
-> пересоздание Activity) живёт дольше создавшей его Activity. Переданный аргументом handler после
-> первого пересоздания будет указывать на мёртвую Activity, и кнопка тихо перестанет работать.
+> `lazy`, а не аргумент конструктора: `ViewModel` живёт дольше создавшей его Activity, поэтому
+> переданный аргументом handler после первого пересоздания будет указывать на мёртвую Activity — и
+> кнопка тихо перестанет работать.
 
 ```kotlin
 scope.launch {
